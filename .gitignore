@@ -1,0 +1,14 @@
+# Python junk
+__pycache__/
+*.pyc
+
+# Kivy/Buildozer junk (DO NOT UPLOAD THESE)
+.buildozer/
+bin/
+
+# Virtual Environment
+venv/
+.env
+
+# VS Code settings (optional, but good practice)
+.vscode/
