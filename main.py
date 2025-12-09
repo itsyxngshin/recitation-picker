@@ -3,21 +3,21 @@ import os
 import random
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.utils import platform
 
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.textfield import MDTextField
+# We use the standard buttons that work on ALL versions
 from kivymd.uix.button import MDRaisedButton, MDIconButton, MDFillRoundFlatIconButton
 from kivymd.uix.label import MDLabel
 from kivymd.uix.list import OneLineAvatarIconListItem, IconRightWidget, IconLeftWidget, MDList
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.toolbar import MDTopAppBar
-from kivymd.uix.snackbar import Snackbar
-
-# --- Constants ---
-DATA_FILE = "class_data.json"
+# We use 'toast' instead of Snackbar because it is much more stable
+from kivymd.toast import toast
 
 class StudentListItem(OneLineAvatarIconListItem):
     """Custom list item with access to update score text"""
@@ -43,8 +43,14 @@ class RecitationPicker(MDApp):
         self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
         
-        self.students = {} # Data: {'Name': Score}
-        self.student_widgets = {} # UI References
+        # --- File Path Logic (Android vs PC) ---
+        if platform == "android":
+            self.data_file = os.path.join(self.user_data_dir, "class_data.json")
+        else:
+            self.data_file = "class_data.json"
+
+        self.students = {} 
+        self.student_widgets = {} 
         self.is_animating = False
         self.grading_dialog = None
 
@@ -91,6 +97,7 @@ class RecitationPicker(MDApp):
         # 4. Result Area
         result_layout = MDBoxLayout(orientation='vertical', size_hint_y=None, height=dp(180), padding=20, spacing=10)
         self.result_label = MDLabel(text="Ready?", halign="center", font_style="H3", theme_text_color="Primary")
+        
         self.pick_btn = MDFillRoundFlatIconButton(
             text="PICK STUDENT",
             icon="dice-multiple",
@@ -100,6 +107,7 @@ class RecitationPicker(MDApp):
             height=dp(60),
             on_release=self.start_roulette
         )
+        
         result_layout.add_widget(self.result_label)
         result_layout.add_widget(self.pick_btn)
 
@@ -111,7 +119,6 @@ class RecitationPicker(MDApp):
         
         self.screen.add_widget(main_layout)
         
-        # Load data on startup
         self.load_data()
         
         return self.screen
@@ -119,20 +126,17 @@ class RecitationPicker(MDApp):
     # --- DATA PERSISTENCE ---
 
     def save_data(self):
-        """Saves the current student dictionary to a JSON file"""
         try:
-            with open(DATA_FILE, 'w') as f:
+            with open(self.data_file, 'w') as f:
                 json.dump(self.students, f)
         except Exception as e:
             print(f"Error saving data: {e}")
 
     def load_data(self):
-        """Loads students from JSON file if it exists"""
-        if os.path.exists(DATA_FILE):
+        if os.path.exists(self.data_file):
             try:
-                with open(DATA_FILE, 'r') as f:
+                with open(self.data_file, 'r') as f:
                     data = json.load(f)
-                    # Rebuild the list
                     for name, score in data.items():
                         self.students[name] = score
                         item = StudentListItem(name=name, score=score, delete_callback=self.remove_student)
@@ -154,11 +158,11 @@ class RecitationPicker(MDApp):
                 self.list_container.add_widget(item)
                 self.input_name.text = ""
                 self.update_count()
-                self.save_data() # Save on add
+                self.save_data()
             else:
-                Snackbar(text=f"{name} is already in the list!", bg_color=(0.8, 0, 0, 1)).open()
+                toast(f"{name} is already in the list!")
         else:
-            Snackbar(text="Please enter a name", bg_color=(0.5, 0.5, 0.5, 1)).open()
+            toast("Please enter a name")
 
     def remove_student(self, list_item):
         name = list_item.student_name
@@ -167,8 +171,8 @@ class RecitationPicker(MDApp):
             del self.student_widgets[name]
             self.list_container.remove_widget(list_item)
             self.update_count()
-            self.save_data() # Save on remove
-            Snackbar(text=f"Removed {name}").open()
+            self.save_data()
+            toast(f"Removed {name}")
 
     def update_count(self):
         self.count_label.text = f"Class List ({len(self.students)})"
@@ -177,7 +181,7 @@ class RecitationPicker(MDApp):
 
     def start_roulette(self, instance):
         if not self.students:
-            Snackbar(text="Add students first!", bg_color=(0.8, 0, 0, 1)).open()
+            toast("Add students first!")
             return
         if self.is_animating: return
 
@@ -193,39 +197,35 @@ class RecitationPicker(MDApp):
         if self.cycle_count == 20: Clock.schedule_once(self.finalize_pick, 0.1)
 
     def finalize_pick(self, dt):
-        # Weighted Logic: 1 / (1 + score)
         names = list(self.students.keys())
         points = list(self.students.values())
         weights = [1 / (1 + p) for p in points]
         
         selected_name = random.choices(names, weights=weights, k=1)[0]
         
-        # Display winner
         self.result_label.text = selected_name
         self.result_label.theme_text_color = "Custom"
         self.result_label.text_color = self.theme_cls.primary_color
         
-        # Show Grading Dialog instead of auto-adding points
         self.show_grading_dialog(selected_name)
         
         self.is_animating = False
         self.pick_btn.disabled = False
 
     def show_grading_dialog(self, name):
-        """Ask teacher if the answer was correct"""
+        # We use a standard MDDialog that works on most versions
         self.grading_dialog = MDDialog(
             title=f"Evaluate {name}",
             text="Did the student answer correctly?",
-            type="custom",
             buttons=[
                 MDRaisedButton(
                     text="INCORRECT / PASS",
-                    md_bg_color=(0.8, 0.4, 0.4, 1), # Red/Orange
+                    md_bg_color=(0.8, 0.4, 0.4, 1),
                     on_release=lambda x: self.grade_student(name, correct=False)
                 ),
                 MDRaisedButton(
                     text="CORRECT (+1)",
-                    md_bg_color=(0.2, 0.6, 0.2, 1), # Green
+                    md_bg_color=(0.2, 0.6, 0.2, 1),
                     on_release=lambda x: self.grade_student(name, correct=True)
                 ),
             ]
@@ -234,17 +234,22 @@ class RecitationPicker(MDApp):
 
     def grade_student(self, name, correct):
         if correct:
-            # Add point -> Reduces probability
             self.students[name] += 1
             if name in self.student_widgets:
                 self.student_widgets[name].update_score_display(self.students[name])
-            Snackbar(text=f"Point added to {name}!").open()
+            toast(f"Point added to {name}!")
         else:
-            # No point -> Probability stays high
-            Snackbar(text=f"No points added for {name}.").open()
+            toast(f"No points added for {name}.")
         
-        self.save_data() # Save scores
-        self.grading_dialog.dismiss()
+        self.save_data()
+        
+        # Schedule the dismiss to prevent button crash
+        Clock.schedule_once(self.dismiss_dialog)
+
+    def dismiss_dialog(self, dt):
+        if self.grading_dialog:
+            self.grading_dialog.dismiss()
+            self.grading_dialog = None
 
     def confirm_clear_all(self):
         if not self.students: return
@@ -263,8 +268,8 @@ class RecitationPicker(MDApp):
         self.list_container.clear_widgets()
         self.update_count()
         self.result_label.text = "Ready?"
-        self.save_data() # Update file
+        self.save_data()
         dialog.dismiss()
 
 if __name__ == '__main__':
-    RecitationPicker().run()
+    RecitationPicker().run() 
