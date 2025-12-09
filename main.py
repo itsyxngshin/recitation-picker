@@ -1,27 +1,33 @@
+import json
+import os
+import random
+from kivy.clock import Clock
+from kivy.metrics import dp
+
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.button import MDRaisedButton, MDIconButton, MDFillRoundFlatIconButton
 from kivymd.uix.label import MDLabel
-from kivymd.uix.list import OneLineAvatarIconListItem, IconRightWidget, IconLeftWidget
+from kivymd.uix.list import OneLineAvatarIconListItem, IconRightWidget, IconLeftWidget, MDList
 from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.toolbar import MDTopAppBar
 from kivymd.uix.snackbar import Snackbar
-from kivy.clock import Clock
-from kivy.metrics import dp
-import random
+
+# --- Constants ---
+DATA_FILE = "class_data.json"
 
 class StudentListItem(OneLineAvatarIconListItem):
     """Custom list item with access to update score text"""
     def __init__(self, name, score, delete_callback, **kwargs):
         super().__init__(**kwargs)
-        self.student_name = name # Store raw name separately
+        self.student_name = name 
         self.text = f"{name} (Points: {score})"
         self.delete_callback = delete_callback
 
-        # Left Icon (Account/Person)
+        # Left Icon (Account)
         self.add_widget(IconLeftWidget(icon="account"))
 
         # Right Icon (Delete)
@@ -37,11 +43,10 @@ class RecitationPicker(MDApp):
         self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
         
-        # CHANGED: Dictionary to store Name:Score pairs
-        # Example: {'Carlo': 0, 'Maria': 2}
-        self.students = {} 
-        self.student_widgets = {} # To keep track of UI items for updating
+        self.students = {} # Data: {'Name': Score}
+        self.student_widgets = {} # UI References
         self.is_animating = False
+        self.grading_dialog = None
 
         # --- Main Layout ---
         self.screen = MDScreen()
@@ -49,7 +54,7 @@ class RecitationPicker(MDApp):
 
         # 1. Top Bar
         toolbar = MDTopAppBar(
-            title="Smart Recitation Picker",
+            title="Classroom Picker",
             elevation=2,
             pos_hint={"top": 1},
             md_bg_color=self.theme_cls.primary_color
@@ -57,21 +62,13 @@ class RecitationPicker(MDApp):
         toolbar.right_action_items = [["delete-sweep", lambda x: self.confirm_clear_all()]]
 
         # 2. Input Area
-        input_layout = MDBoxLayout(
-            orientation='horizontal', 
-            spacing=10, 
-            padding=20, 
-            size_hint_y=None, 
-            height=dp(80)
-        )
-        
+        input_layout = MDBoxLayout(orientation='horizontal', spacing=10, padding=20, size_hint_y=None, height=dp(80))
         self.input_name = MDTextField(
-            hint_text="Student Name",
+            hint_text="Add Student Name",
             mode="fill",
             size_hint_x=0.7,
             on_text_validate=self.add_student
         )
-        
         add_btn = MDIconButton(
             icon="plus-box",
             icon_size="48sp",
@@ -79,11 +76,10 @@ class RecitationPicker(MDApp):
             text_color=self.theme_cls.primary_color,
             on_release=self.add_student
         )
-        
         input_layout.add_widget(self.input_name)
         input_layout.add_widget(add_btn)
 
-        # 3. Student List Area
+        # 3. List Area
         list_label_layout = MDBoxLayout(size_hint_y=None, height=dp(30), padding=[20,0])
         self.count_label = MDLabel(text="Class List (0)", theme_text_color="Secondary", font_style="Caption")
         list_label_layout.add_widget(self.count_label)
@@ -93,21 +89,8 @@ class RecitationPicker(MDApp):
         scroll.add_widget(self.list_container)
 
         # 4. Result Area
-        result_layout = MDBoxLayout(
-            orientation='vertical',
-            size_hint_y=None,
-            height=dp(180),
-            padding=20,
-            spacing=10
-        )
-        
-        self.result_label = MDLabel(
-            text="Ready?",
-            halign="center",
-            font_style="H3",
-            theme_text_color="Primary"
-        )
-        
+        result_layout = MDBoxLayout(orientation='vertical', size_hint_y=None, height=dp(180), padding=20, spacing=10)
+        self.result_label = MDLabel(text="Ready?", halign="center", font_style="H3", theme_text_color="Primary")
         self.pick_btn = MDFillRoundFlatIconButton(
             text="PICK STUDENT",
             icon="dice-multiple",
@@ -117,7 +100,6 @@ class RecitationPicker(MDApp):
             height=dp(60),
             on_release=self.start_roulette
         )
-
         result_layout.add_widget(self.result_label)
         result_layout.add_widget(self.pick_btn)
 
@@ -126,26 +108,53 @@ class RecitationPicker(MDApp):
         main_layout.add_widget(list_label_layout)
         main_layout.add_widget(scroll)
         main_layout.add_widget(result_layout)
-
+        
         self.screen.add_widget(main_layout)
+        
+        # Load data on startup
+        self.load_data()
+        
         return self.screen
 
-    # --- Logic ---
+    # --- DATA PERSISTENCE ---
+
+    def save_data(self):
+        """Saves the current student dictionary to a JSON file"""
+        try:
+            with open(DATA_FILE, 'w') as f:
+                json.dump(self.students, f)
+        except Exception as e:
+            print(f"Error saving data: {e}")
+
+    def load_data(self):
+        """Loads students from JSON file if it exists"""
+        if os.path.exists(DATA_FILE):
+            try:
+                with open(DATA_FILE, 'r') as f:
+                    data = json.load(f)
+                    # Rebuild the list
+                    for name, score in data.items():
+                        self.students[name] = score
+                        item = StudentListItem(name=name, score=score, delete_callback=self.remove_student)
+                        self.student_widgets[name] = item
+                        self.list_container.add_widget(item)
+                    self.update_count()
+            except Exception as e:
+                print(f"Error loading data: {e}")
+
+    # --- APP LOGIC ---
 
     def add_student(self, instance=None):
         name = self.input_name.text.strip()
         if name:
             if name not in self.students:
-                # Initialize student with 0 points
                 self.students[name] = 0
-                
-                # Add UI Item
                 item = StudentListItem(name=name, score=0, delete_callback=self.remove_student)
-                self.student_widgets[name] = item # Store reference
+                self.student_widgets[name] = item
                 self.list_container.add_widget(item)
-                
                 self.input_name.text = ""
                 self.update_count()
+                self.save_data() # Save on add
             else:
                 Snackbar(text=f"{name} is already in the list!", bg_color=(0.8, 0, 0, 1)).open()
         else:
@@ -158,91 +167,95 @@ class RecitationPicker(MDApp):
             del self.student_widgets[name]
             self.list_container.remove_widget(list_item)
             self.update_count()
+            self.save_data() # Save on remove
             Snackbar(text=f"Removed {name}").open()
 
     def update_count(self):
         self.count_label.text = f"Class List ({len(self.students)})"
 
+    # --- ROULETTE & GRADING ---
+
     def start_roulette(self, instance):
         if not self.students:
             Snackbar(text="Add students first!", bg_color=(0.8, 0, 0, 1)).open()
             return
-        
-        if self.is_animating:
-            return
+        if self.is_animating: return
 
         self.is_animating = True
         self.pick_btn.disabled = True
-        self.result_label.theme_text_color = "Primary"
-        
         self.cycle_count = 0
         Clock.schedule_interval(self.cycle_names, 0.1)
 
     def cycle_names(self, dt):
-        # Visual effect: Just pick purely random names for the "flashing" part
-        temp_names = list(self.students.keys())
-        self.result_label.text = random.choice(temp_names)
+        self.result_label.text = random.choice(list(self.students.keys()))
         self.cycle_count += 1
-
-        if self.cycle_count > 20:
-            return False 
-        
-        if self.cycle_count == 20:
-            Clock.schedule_once(self.finalize_pick, 0.1)
+        if self.cycle_count > 20: return False
+        if self.cycle_count == 20: Clock.schedule_once(self.finalize_pick, 0.1)
 
     def finalize_pick(self, dt):
-        # --- THE WEIGHTED LOGIC ---
+        # Weighted Logic: 1 / (1 + score)
         names = list(self.students.keys())
         points = list(self.students.values())
-        
-        # Calculate weights: Higher points = Lower weight
-        # Formula: 1 / (1 + points)
         weights = [1 / (1 + p) for p in points]
         
-        # random.choices returns a list, so we take [0]
         selected_name = random.choices(names, weights=weights, k=1)[0]
         
-        # --- UPDATE SCORES ---
-        self.students[selected_name] += 1
-        new_score = self.students[selected_name]
-        
-        # Update the UI List Item to show new score
-        if selected_name in self.student_widgets:
-            self.student_widgets[selected_name].update_score_display(new_score)
-
-        # Update Result Label
+        # Display winner
         self.result_label.text = selected_name
         self.result_label.theme_text_color = "Custom"
         self.result_label.text_color = self.theme_cls.primary_color
         
+        # Show Grading Dialog instead of auto-adding points
+        self.show_grading_dialog(selected_name)
+        
         self.is_animating = False
         self.pick_btn.disabled = False
-        
-        self.show_winner_dialog(selected_name, new_score)
 
-    def show_winner_dialog(self, name, score):
-        dialog = MDDialog(
-            title="🎉 Selected!",
-            text=f"[b]{name}[/b] has been chosen!\nThey now have {score} points.",
+    def show_grading_dialog(self, name):
+        """Ask teacher if the answer was correct"""
+        self.grading_dialog = MDDialog(
+            title=f"Evaluate {name}",
+            text="Did the student answer correctly?",
+            type="custom",
             buttons=[
-                MDRaisedButton(text="OK", on_release=lambda x: dialog.dismiss())
+                MDRaisedButton(
+                    text="INCORRECT / PASS",
+                    md_bg_color=(0.8, 0.4, 0.4, 1), # Red/Orange
+                    on_release=lambda x: self.grade_student(name, correct=False)
+                ),
+                MDRaisedButton(
+                    text="CORRECT (+1)",
+                    md_bg_color=(0.2, 0.6, 0.2, 1), # Green
+                    on_release=lambda x: self.grade_student(name, correct=True)
+                ),
             ]
         )
-        dialog.open()
+        self.grading_dialog.open()
+
+    def grade_student(self, name, correct):
+        if correct:
+            # Add point -> Reduces probability
+            self.students[name] += 1
+            if name in self.student_widgets:
+                self.student_widgets[name].update_score_display(self.students[name])
+            Snackbar(text=f"Point added to {name}!").open()
+        else:
+            # No point -> Probability stays high
+            Snackbar(text=f"No points added for {name}.").open()
+        
+        self.save_data() # Save scores
+        self.grading_dialog.dismiss()
 
     def confirm_clear_all(self):
-        if not self.students:
-            return
-            
-        dialog = MDDialog(
+        if not self.students: return
+        MDDialog(
             title="Reset Class?",
-            text="Clear all names and scores?",
+            text="Clear all names and scores permanently?",
             buttons=[
-                MDRaisedButton(text="CANCEL", md_bg_color=(0.5,0.5,0.5,1), on_release=lambda x: dialog.dismiss()),
-                MDRaisedButton(text="CLEAR", md_bg_color=(1,0,0,1), on_release=lambda x: self.clear_data(dialog))
+                MDRaisedButton(text="CANCEL", on_release=lambda x: x.parent.parent.parent.parent.dismiss()),
+                MDRaisedButton(text="CLEAR", md_bg_color=(1,0,0,1), on_release=lambda x: self.clear_data(x.parent.parent.parent.parent))
             ]
-        )
-        dialog.open()
+        ).open()
 
     def clear_data(self, dialog):
         self.students.clear()
@@ -250,10 +263,8 @@ class RecitationPicker(MDApp):
         self.list_container.clear_widgets()
         self.update_count()
         self.result_label.text = "Ready?"
+        self.save_data() # Update file
         dialog.dismiss()
-
-# Required for MDList to work
-from kivymd.uix.list import MDList
 
 if __name__ == '__main__':
     RecitationPicker().run()
