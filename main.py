@@ -5,6 +5,7 @@ from datetime import datetime
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.utils import platform
+from kivy.core.window import Window
 
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
@@ -53,6 +54,10 @@ class RecitationPicker(MDApp):
     def build(self):
         self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
+        
+        if platform == "android":
+            from android.permissions import request_permissions, Permission
+            request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE])
         
         self.students = {} 
         self.student_widgets = {} 
