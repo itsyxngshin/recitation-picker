@@ -2,319 +2,237 @@ from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.textfield import MDTextField
-from kivymd.uix.button import MDRaisedButton, MDFillRoundFlatButton
+from kivymd.uix.button import MDRaisedButton, MDIconButton, MDFillRoundFlatIconButton
 from kivymd.uix.label import MDLabel
+from kivymd.uix.list import OneLineAvatarIconListItem, IconRightWidget, IconLeftWidget
+from kivymd.uix.scrollview import MDScrollView
 from kivymd.uix.dialog import MDDialog
-from kivymd.uix.card import MDCard
 from kivymd.uix.toolbar import MDTopAppBar
+from kivymd.uix.snackbar import Snackbar
+from kivy.clock import Clock
+from kivy.metrics import dp
 import random
+
+class StudentListItem(OneLineAvatarIconListItem):
+    """Custom list item to handle individual student deletion"""
+    def __init__(self, name, delete_callback, **kwargs):
+        super().__init__(**kwargs)
+        self.text = name
+        self.delete_callback = delete_callback
+
+        # Left Icon (Person)
+        self.add_widget(IconLeftWidget(icon="account"))
+
+        # Right Icon (Delete/Trash)
+        delete_icon = IconRightWidget(icon="trash-can-outline", theme_text_color="Error")
+        delete_icon.bind(on_release=lambda x: self.delete_callback(self))
+        self.add_widget(delete_icon)
 
 class RecitationPicker(MDApp):
     def build(self):
-        self.theme_cls.primary_palette = "Indigo"
+        self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
-        self.theme_cls.primary_hue = "500"
-        
-        self.students = []  # List to store student names
-        
-        # Main Layout (Vertical)
+        self.students = []
+        self.is_animating = False
+
+        # --- Main Layout ---
+        self.screen = MDScreen()
         main_layout = MDBoxLayout(orientation='vertical', spacing=0)
-        
-        # Top App Bar
+
+        # 1. Top Bar
         toolbar = MDTopAppBar(
-            title="Classroom Recitation Picker",
-            elevation=4,
-            md_bg_color=self.theme_cls.primary_color,
-            specific_text_color=(1, 1, 1, 1)
-        )
-        
-        # Content Layout
-        content_layout = MDBoxLayout(
-            orientation='vertical',
-            padding=[20, 20, 20, 20],
-            spacing=20,
-            size_hint_y=None
-        )
-        content_layout.bind(minimum_height=content_layout.setter('height'))
-        
-        # Input Section Card
-        input_card = MDCard(
+            title="Classroom Picker",
             elevation=2,
-            radius=10,
-            padding=[20, 20, 20, 20],
-            size_hint_y=None,
-            height=200
+            pos_hint={"top": 1},
+            md_bg_color=self.theme_cls.primary_color
+        )
+        toolbar.right_action_items = [["delete-sweep", lambda x: self.confirm_clear_all()]]
+
+        # 2. Input Area (Compact)
+        input_layout = MDBoxLayout(
+            orientation='horizontal', 
+            spacing=10, 
+            padding=20, 
+            size_hint_y=None, 
+            height=dp(80)
         )
         
-        input_layout = MDBoxLayout(orientation='vertical', spacing=15)
-        
-        # Title for input section
-        input_title = MDLabel(
-            text="Add Student",
-            halign="center",
-            font_style="H5",
-            theme_text_color="Primary",
-            size_hint_y=None,
-            height=30
-        )
-        
-        # Input Field
         self.input_name = MDTextField(
-            hint_text="Enter student name here...",
-            mode="rectangle",
-            icon_right="account-plus",
-            size_hint_y=None,
-            height=50
+            hint_text="Student Name",
+            mode="fill",
+            size_hint_x=0.7,
+            on_text_validate=self.add_student # Allow "Enter" key
         )
         
-        # Add Button
-        add_btn = MDRaisedButton(
-            text="ADD STUDENT",
-            md_bg_color=self.theme_cls.primary_color,
-            size_hint_y=None,
-            height=50,
+        add_btn = MDIconButton(
+            icon="plus-box",
+            icon_size="48sp",
+            theme_text_color="Custom",
+            text_color=self.theme_cls.primary_color,
             on_release=self.add_student
         )
         
-        input_layout.add_widget(input_title)
         input_layout.add_widget(self.input_name)
         input_layout.add_widget(add_btn)
-        input_card.add_widget(input_layout)
-        
-        # Current Students Card
-        students_card = MDCard(
-            elevation=2,
-            radius=10,
-            padding=[20, 20, 20, 20],
+
+        # 3. Student List Area (Scrollable)
+        list_label_layout = MDBoxLayout(size_hint_y=None, height=dp(30), padding=[20,0])
+        self.count_label = MDLabel(text="Class List (0)", theme_text_color="Secondary", font_style="Caption")
+        list_label_layout.add_widget(self.count_label)
+
+        scroll = MDScrollView()
+        self.list_container = MDList()
+        scroll.add_widget(self.list_container)
+
+        # 4. Result Area (The "Stage")
+        result_layout = MDBoxLayout(
+            orientation='vertical',
             size_hint_y=None,
-            height=120
-        )
-        
-        students_layout = MDBoxLayout(orientation='vertical', spacing=10)
-        
-        students_title = MDLabel(
-            text="Current Students",
-            halign="center",
-            font_style="H5",
-            theme_text_color="Primary",
-            size_hint_y=None,
-            height=30
-        )
-        
-        # Label to show current student count
-        self.students_label = MDLabel(
-            text="No students added yet",
-            halign="center",
-            font_style="Body1",
-            theme_text_color="Secondary",
-            size_hint_y=None,
-            height=40
-        )
-        
-        students_layout.add_widget(students_title)
-        students_layout.add_widget(self.students_label)
-        students_card.add_widget(students_layout)
-        
-        # Result Display Card
-        result_card = MDCard(
-            elevation=2,
-            radius=10,
-            padding=[20, 20, 20, 20],
-            size_hint_y=None,
-            height=150
-        )
-        
-        result_layout = MDBoxLayout(orientation='vertical', spacing=10)
-        
-        result_title = MDLabel(
-            text="Selected Student",
-            halign="center",
-            font_style="H5",
-            theme_text_color="Primary",
-            size_hint_y=None,
-            height=30
+            height=dp(180),
+            padding=20,
+            spacing=10
         )
         
         self.result_label = MDLabel(
-            text="Ready to pick...",
+            text="Ready?",
             halign="center",
-            font_style="H4",
-            theme_text_color="Secondary",
-            bold=True
+            font_style="H3",
+            theme_text_color="Primary"
         )
-        
-        result_layout.add_widget(result_title)
-        result_layout.add_widget(self.result_label)
-        result_card.add_widget(result_layout)
         
         # Pick Button
-        pick_btn = MDRaisedButton(
-            text="🎯 PICK RANDOM STUDENT",
-            md_bg_color=(0.8, 0.1, 0.1, 1),  # Red color
-            theme_text_color="Custom",
-            text_color=(1, 1, 1, 1),
+        self.pick_btn = MDFillRoundFlatIconButton(
+            text="PICK STUDENT",
+            icon="dice-multiple",
+            font_size="20sp",
+            size_hint_x=1,
             size_hint_y=None,
-            height=60,
-            font_style="H6",
-            on_release=self.pick_student
+            height=dp(60),
+            on_release=self.start_roulette
         )
-        
-        # Stats Label
-        self.stats_label = MDLabel(
-            text="Total Students: 0",
-            halign="center",
-            font_style="Subtitle1",
-            theme_text_color="Primary",
-            size_hint_y=None,
-            height=30
-        )
-        
-        # Clear All Button
-        clear_btn = MDRaisedButton(
-            text="CLEAR ALL STUDENTS",
-            md_bg_color=(0.5, 0.5, 0.5, 1),  # Gray color
-            theme_text_color="Custom",
-            text_color=(1, 1, 1, 1),
-            size_hint_y=None,
-            height=45,
-            on_release=self.clear_all_students
-        )
-        
-        # Add widgets to content layout
-        content_layout.add_widget(input_card)
-        content_layout.add_widget(students_card)
-        content_layout.add_widget(result_card)
-        content_layout.add_widget(pick_btn)
-        content_layout.add_widget(clear_btn)
-        content_layout.add_widget(self.stats_label)
-        
-        # Add everything to main layout
+
+        result_layout.add_widget(self.result_label)
+        result_layout.add_widget(self.pick_btn)
+
+        # Assemble
         main_layout.add_widget(toolbar)
-        main_layout.add_widget(content_layout)
-        
-        screen = MDScreen()
-        screen.add_widget(main_layout)
-        return screen
-    
-    def add_student(self, instance):
+        main_layout.add_widget(input_layout)
+        main_layout.add_widget(list_label_layout)
+        main_layout.add_widget(scroll)
+        main_layout.add_widget(result_layout)
+
+        self.screen.add_widget(main_layout)
+        return self.screen
+
+    # --- Logic ---
+
+    def add_student(self, instance=None):
         name = self.input_name.text.strip()
         if name:
             if name not in self.students:
                 self.students.append(name)
-                self.input_name.text = ""  # Clear input
                 
-                # Update display
-                self.update_display()
+                # Add visually to list
+                item = StudentListItem(name=name, delete_callback=self.remove_student)
+                self.list_container.add_widget(item)
                 
-                # Show success message
-                self.result_label.text = f"✓ Added: {name}"
-                self.result_label.theme_text_color = "Primary"
+                self.input_name.text = ""
+                self.update_count()
             else:
-                self.result_label.text = f"{name} already exists!"
-                self.result_label.theme_text_color = "Error"
+                Snackbar(text=f"{name} is already in the list!", bg_color=(0.8, 0, 0, 1)).open()
         else:
-            self.result_label.text = "Please enter a name!"
-            self.result_label.theme_text_color = "Error"
-    
-    def update_display(self):
-        # Update student count display
-        if self.students:
-            if len(self.students) <= 5:
-                self.students_label.text = ", ".join(self.students)
-            else:
-                self.students_label.text = f"{len(self.students)} students added"
-            self.students_label.theme_text_color = "Primary"
-        else:
-            self.students_label.text = "No students added yet"
-            self.students_label.theme_text_color = "Secondary"
-        
-        # Update stats
-        self.stats_label.text = f"Total Students: {len(self.students)}"
-    
-    def pick_student(self, instance):
+            Snackbar(text="Please enter a name", bg_color=(0.5, 0.5, 0.5, 1)).open()
+
+    def remove_student(self, list_item):
+        """Removes a single student from data and UI"""
+        name = list_item.text
+        if name in self.students:
+            self.students.remove(name)
+            self.list_container.remove_widget(list_item)
+            self.update_count()
+            Snackbar(text=f"Removed {name}").open()
+
+    def update_count(self):
+        self.count_label.text = f"Class List ({len(self.students)})"
+
+    def start_roulette(self, instance):
         if not self.students:
-            self.result_label.text = "Student list is empty!"
-            self.result_label.theme_text_color = "Error"
+            Snackbar(text="Add students first!", bg_color=(0.8, 0, 0, 1)).open()
             return
         
-        # Pick random student
+        if self.is_animating:
+            return
+
+        self.is_animating = True
+        self.pick_btn.disabled = True # Prevent double clicking
+        self.result_label.theme_text_color = "Primary"
+        
+        # Start the cycling animation
+        self.cycle_count = 0
+        Clock.schedule_interval(self.cycle_names, 0.1)
+
+    def cycle_names(self, dt):
+        """Rapidly flashes names to create a roulette effect"""
+        self.result_label.text = random.choice(self.students)
+        self.cycle_count += 1
+
+        # Stop after 20 flashes (approx 2 seconds)
+        if self.cycle_count > 20:
+            return False # Stops the interval
+        
+        # Trigger the final pick slightly after the loop ends
+        if self.cycle_count == 20:
+            Clock.schedule_once(self.finalize_pick, 0.1)
+
+    def finalize_pick(self, dt):
+        """The actual selection logic"""
         selected = random.choice(self.students)
         
-        # Remove the selected student from the list
-        self.students.remove(selected)
-        
-        # Update display
-        self.update_display()
-        
-        # Update result display
-        self.result_label.text = f"🎉 {selected} 🎉"
+        # Visuals for the winner
+        self.result_label.text = selected
         self.result_label.theme_text_color = "Custom"
-        self.result_label.text_color = (0, 0.6, 0, 1)  # Green color
+        self.result_label.text_color = self.theme_cls.primary_color
         
-        # Show congratulatory dialog
-        self.show_congrats_dialog(selected)
-    
-    def clear_all_students(self, instance):
+        # Remove from logic (optional: depends if you want them pickable again)
+        # self.students.remove(selected) 
+        # self.update_list_ui() # You would need to refresh the list if you remove them
+        
+        self.is_animating = False
+        self.pick_btn.disabled = False
+        
+        # Optional: Show a dialog for the winner
+        self.show_winner_dialog(selected)
+
+    def show_winner_dialog(self, name):
+        dialog = MDDialog(
+            title="🎉 We have a speaker!",
+            text=f"Please stand up, [b]{name}[/b]!",
+            buttons=[
+                MDRaisedButton(text="OK", on_release=lambda x: dialog.dismiss())
+            ]
+        )
+        dialog.open()
+
+    def confirm_clear_all(self):
         if not self.students:
-            self.result_label.text = "List is already empty!"
-            self.result_label.theme_text_color = "Error"
             return
-        
-        # Show confirmation dialog
-        self.show_clear_confirmation()
-    
-    def show_congrats_dialog(self, student_name):
+            
         dialog = MDDialog(
-            title="🎊 Selected! 🎊",
-            text=f"{student_name} has been selected for recitation!",
-            size_hint=[0.8, None],
+            title="Reset Class?",
+            text="This will remove all student names.",
             buttons=[
-                MDFillRoundFlatButton(
-                    text="OK",
-                    theme_text_color="Custom",
-                    text_color=(1, 1, 1, 1),
-                    md_bg_color=self.theme_cls.primary_color,
-                    on_release=lambda x: dialog.dismiss()
-                )
+                MDRaisedButton(text="CANCEL", md_bg_color=(0.5,0.5,0.5,1), on_release=lambda x: dialog.dismiss()),
+                MDRaisedButton(text="CLEAR", md_bg_color=(1,0,0,1), on_release=lambda x: self.clear_data(dialog))
             ]
         )
         dialog.open()
-    
-    def show_clear_confirmation(self):
-        dialog = MDDialog(
-            title="Clear All Students",
-            text=f"Are you sure you want to remove all {len(self.students)} students?",
-            size_hint=[0.8, None],
-            buttons=[
-                MDFillRoundFlatButton(
-                    text="CANCEL",
-                    theme_text_color="Custom",
-                    text_color=(1, 1, 1, 1),
-                    md_bg_color=(0.5, 0.5, 0.5, 1),
-                    on_release=lambda x: dialog.dismiss()
-                ),
-                MDFillRoundFlatButton(
-                    text="CLEAR ALL",
-                    theme_text_color="Custom",
-                    text_color=(1, 1, 1, 1),
-                    md_bg_color=(0.8, 0.1, 0.1, 1),
-                    on_release=lambda x: self.confirm_clear_all(dialog)
-                )
-            ]
-        )
-        dialog.open()
-    
-    def confirm_clear_all(self, dialog):
-        # Clear all students
+
+    def clear_data(self, dialog):
         self.students.clear()
-        
-        # Update display
-        self.update_display()
-        
-        # Update result label
-        self.result_label.text = "All students cleared!"
-        self.result_label.theme_text_color = "Error"
-        
+        self.list_container.clear_widgets()
+        self.update_count()
+        self.result_label.text = "Ready?"
+        self.result_label.theme_text_color = "Primary"
         dialog.dismiss()
 
 if __name__ == '__main__':
