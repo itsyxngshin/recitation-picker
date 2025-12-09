@@ -1,0 +1,13 @@
+[2025-12-09 17:49:04] App Started
+[2025-12-09 17:49:12] Started Roulette
+[2025-12-09 17:49:14] Picked: Mark James
+[2025-12-09 17:49:16] Graded Mark James: Incorrect
+[2025-12-09 17:49:17] Started Roulette
+[2025-12-09 17:49:19] Picked: Kairi
+[2025-12-09 17:49:20] Graded Kairi: Correct (+1)
+[2025-12-09 17:49:26] Started Roulette
+[2025-12-09 17:49:28] Picked: Jethro
+[2025-12-09 17:53:09] App Started
+[2025-12-09 17:53:27] Exported scores to ScoreSheet_2025-12-09_17-53.txt
+[2025-12-09 17:58:43] Started Roulette
+[2025-12-09 17:58:45] Picked: Ador
